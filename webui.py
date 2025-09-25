@@ -51,6 +51,8 @@ import gradio as gr
 from indextts.infer_v2 import IndexTTS2
 from tools.i18n.i18n import I18nAuto
 
+PROMPT_FILE="/root/audio/prompt.mp3"
+
 i18n = I18nAuto(language="Auto")
 MODE = 'local'
 tts = IndexTTS2(model_dir=cmd_args.model_dir,
@@ -109,7 +111,7 @@ def get_example_cases(include_experimental = False):
     # exclude emotion control mode 3 (emotion from text description)
     return [x for x in example_cases if x[1] != EMO_CHOICES_ALL[3]]
 
-def gen_single(emo_control_method,prompt, text,
+def gen_single(emo_control_method,prompt=PROMPT_FILE, text,
                emo_ref_path, emo_weight,
                vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8,
                emo_text,emo_random,
@@ -172,7 +174,8 @@ def create_warning_message(warning_text):
 def create_experimental_warning_message():
     return create_warning_message(i18n('提示：此功能为实验版，结果尚不稳定，我们正在持续优化中。'))
 
-with gr.Blocks(title="IndexTTS Demo") as demo:
+#delete cache if older than 300 secs
+with gr.Blocks(title="IndexTTS Demo", delete_cache=(10,300)) as demo:
     mutex = threading.Lock()
     gr.HTML('''
     <h2><center>IndexTTS2: A Breakthrough in Emotionally Expressive and Duration-Controlled Auto-Regressive Zero-Shot Text-to-Speech</h2>
@@ -192,7 +195,7 @@ with gr.Blocks(title="IndexTTS Demo") as demo:
                 default = prompt_list[0]
             with gr.Column():
                 input_text_single = gr.TextArea(label=i18n("文本"),key="input_text_single", placeholder=i18n("请输入目标文本"), info=f"{i18n('当前模型版本')}{tts.model_version or '1.0'}")
-                gen_button = gr.Button(i18n("生成语音"), key="gen_button",interactive=True)
+                gen_button = gr.button(i18n("生成语音"), key="gen_button",interactive=true)
             output_audio = gr.Audio(label=i18n("生成结果"), visible=True,key="output_audio")
 
         experimental_checkbox = gr.Checkbox(label=i18n("显示实验功能"), value=False)
@@ -434,7 +437,6 @@ with gr.Blocks(title="IndexTTS Demo") as demo:
                              *advanced_params,
                      ],
                      outputs=[output_audio])
-
 
 
 if __name__ == "__main__":
