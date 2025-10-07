@@ -50,6 +50,9 @@ for file in [
 import gradio as gr
 from indextts.infer_v2 import IndexTTS2
 from tools.i18n.i18n import I18nAuto
+import gc
+import shutil
+from pathlib import Path
 
 i18n = I18nAuto(language="Auto")
 MODE = 'local'
@@ -171,6 +174,91 @@ def create_warning_message(warning_text):
 
 def create_experimental_warning_message():
     return create_warning_message(i18n('提示：此功能为实验版，结果尚不稳定，我们正在持续优化中。'))
+
+def clear_gradio_cache():
+    """Clear Gradio's built-in cache and temporary files"""
+    try:
+        # Clear gradio temporary files
+        temp_dirs = [
+            Path.cwd().absolute()/"cache",
+            Path("/tmp/gradio"),
+            Path("outputs/tasks"),
+            Path("outputs")  # Clear generated audio files
+        ]
+
+        cleared_size = 0
+        cleared_files = 0
+
+        for temp_dir in temp_dirs:
+            if temp_dir.exists():
+                # Calculate size before deletion
+                if temp_dir.is_dir():
+                    for item in temp_dir.glob('**/*'):
+                        if item.is_file():
+                            try:
+                                cleared_size += item.stat().st_size
+                                item.unlink()
+                                cleared_files += 1
+                            except (PermissionError, FileNotFoundError):
+                                pass
+                    # Remove empty directories
+                    for item in sorted(temp_dir.glob('**/*'), reverse=True):
+                        if item.is_dir():
+                            try:
+                                item.rmdir()
+                            except OSError:
+                                pass
+
+        # Force garbage collection
+        gc.collect()
+
+        return f"✅ Cache cleared successfully!\n📁 Files deleted: {cleared_files}\n💾 Space freed: {cleared_size / (1024*1024):.2f} MB"
+
+    except Exception as e:
+        return f"❌ Error clearing cache: {str(e)}"
+
+def get_cache_info():
+    """Get information about current cache usage"""
+    try:
+        cache_info = {}
+        total_size = 0
+
+        # Check various cache directories
+        cache_dirs = [
+            Path.cwd().absolute()/"cache",
+            Path("/tmp/gradio"),
+            Path("outputs"),
+            Path("outputs/tasks")
+        ]
+
+        for cache_dir in cache_dirs:
+            if cache_dir.exists():
+                dir_size = 0
+                file_count = 0
+                for item in cache_dir.glob('**/*'):
+                    if item.is_file():
+                        try:
+                            dir_size += item.stat().st_size
+                            file_count += 1
+                        except (PermissionError, FileNotFoundError):
+                            pass
+                cache_info[str(cache_dir)] = {"size": dir_size, "files": file_count}
+                total_size += dir_size
+
+        info_text = "📊 Current Cache Usage:\n\n"
+        for dir_path, info in cache_info.items():
+            size_mb = info["size"] / (1024*1024)
+            info_text += f"📁 {dir_path}:\n"
+            info_text += f"   • Files: {info['files']}\n"
+            info_text += f"   • Size: {size_mb:.2f} MB\n\n"
+
+        info_text += f"💾 Total: {total_size / (1024*1024):.2f} MB"
+
+        return info_text
+
+    except Exception as e:
+        return f"❌ Error getting cache info: {str(e)}"
+
 
 with gr.Blocks(title="IndexTTS Demo") as demo:
     mutex = threading.Lock()
@@ -303,6 +391,42 @@ with gr.Blocks(title="IndexTTS Demo") as demo:
                         vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8]
         )
 
+    with gr.Tab(i18n("缓存管理")):
+        gr.Markdown("## 🗑️ Cache Management")
+        gr.Markdown("Manage Gradio cache and temporary files to free up disk space and improve performance.")
+
+        with gr.Row():
+            with gr.Column():
+                cache_info_display = gr.Textbox(
+                    label="Cache Usage Information",
+                    value=get_cache_info(),
+                    lines=10,
+                    interactive=False,
+                    info="Shows current cache usage across different directories"
+                )
+
+            with gr.Column():
+                gr.Markdown("### Cache Operations")
+
+                clear_cache_btn = gr.Button(
+                    "🗑️ Clear All Cache",
+                    variant="primary",
+                    size="lg"
+                )
+
+                refresh_info_btn = gr.Button(
+                    "🔄 Refresh Cache Info",
+                    variant="secondary",
+                )
+
+        cache_status_display = gr.Textbox(
+            label="Operation Status",
+            lines=3,
+            interactive=False,
+            visible=False
+        )
+
+    
     def on_example_click(example):
         print(f"Example clicked: ({len(example)} values) = {example!r}")
         return (
@@ -426,6 +550,24 @@ with gr.Blocks(title="IndexTTS Demo") as demo:
                          inputs=[],
                          outputs=[gen_button])
 
+    # Cache management event handlers
+    def handle_clear_cache():
+        result = clear_gradio_cache()
+        return gr.update(value=result, visible=True), gr.update(value=get_cache_info())
+
+    def handle_refresh_info():
+        return gr.update(value=get_cache_info())
+
+    clear_cache_btn.click(
+        handle_clear_cache,
+        outputs=[cache_status_display, cache_info_display]
+    )
+
+    refresh_info_btn.click(
+        handle_refresh_info,
+        outputs=[cache_info_display]
+    )
+
     gen_button.click(gen_single,
                      inputs=[emo_control_method,prompt_audio, input_text_single, emo_upload, emo_weight,
                             vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8,
@@ -438,5 +580,6 @@ with gr.Blocks(title="IndexTTS Demo") as demo:
 
 
 if __name__ == "__main__":
+    gr.set_static_paths(paths=[Path.cwd().absolute()/"cache"])
     demo.queue(20)
-    demo.launch(server_name=cmd_args.host, server_port=cmd_args.port)
+    demo.launch(server_name=cmd_args.host, server_port=cmd_args.port, allowed_paths=["/tmp/gradio", "outputs/"])
